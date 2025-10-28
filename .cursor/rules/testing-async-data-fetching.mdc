@@ -1,0 +1,309 @@
+---
+description: Testing Patterns for Async Data Fetching
+---
+
+# Testing Async Data Fetching
+
+## Test Setup Pattern
+
+When testing components that use data fetching hooks:
+
+```typescript
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderHook, screen, waitFor } from '@testing-library/react';
+
+// 1. Create fresh QueryClient for each test
+const createTestQueryClient = () => new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      gcTime: Infinity, // Keep cache during test
+    },
+  },
+});
+
+// 2. Create test wrapper
+function createWrapper(queryClient: QueryClient) {
+  return ({ children }) => (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  );
+}
+
+// 3. Use in tests
+test('loads data', async () => {
+  const queryClient = createTestQueryClient();
+  const wrapper = createWrapper(queryClient);
+  
+  const { result } = renderHook(() => useBlock(5), { wrapper });
+  
+  await waitFor(() => {
+    expect(result.current.isSuccess).toBe(true);
+  });
+});
+```
+
+## Mocking Network Requests
+
+Mock at the lowest level (RPC/API call level):
+
+```typescript
+// Mock the RPC client, not the hooks
+jest.mock('./lib/nearRpc', () => ({
+  rpc: {
+    block: jest.fn(),
+    transactions: jest.fn(),
+  },
+}));
+
+import { rpc } from './lib/nearRpc';
+
+test('handles block data', async () => {
+  // 1. Setup mock to return specific data
+  rpc.block.mockResolvedValue({
+    header: { height: 100, timestamp: Date.now() },
+    transactions: [],
+  });
+
+  // 2. Render component and test
+  const { result } = renderHook(() => useBlock(100), { wrapper });
+
+  // 3. Wait for query to complete
+  await waitFor(() => {
+    expect(result.current.isSuccess).toBe(true);
+  });
+
+  // 4. Assert expected data
+  expect(result.current.data.header.height).toBe(100);
+});
+```
+
+## Testing Loading States
+
+Verify loading, success, and error states:
+
+```typescript
+test('shows loading then data', async () => {
+  const queryClient = createTestQueryClient();
+  const { rerender } = render(
+    <QueryClientProvider client={queryClient}>
+      <BlockComponent height={5} />
+    </QueryClientProvider>
+  );
+
+  // 1. Should be loading initially
+  expect(screen.getByText('Loading...')).toBeInTheDocument();
+
+  // 2. Wait for data to load
+  await waitFor(() => {
+    expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
+  });
+
+  // 3. Data should be displayed
+  expect(screen.getByText(/height: 5/)).toBeInTheDocument();
+});
+```
+
+## Testing Error Handling
+
+Test graceful error handling:
+
+```typescript
+test('handles error gracefully', async () => {
+  rpc.block.mockRejectedValue(new Error('Network error'));
+
+  const { result } = renderHook(() => useBlock(5), { wrapper });
+
+  await waitFor(() => {
+    expect(result.current.isError).toBe(true);
+  });
+
+  expect(result.current.error).toBeDefined();
+  // Component should show error message
+});
+
+test('retries on failure', async () => {
+  let attemptCount = 0;
+  rpc.block.mockImplementation(() => {
+    attemptCount++;
+    if (attemptCount < 2) {
+      return Promise.reject(new Error('Failed'));
+    }
+    return Promise.resolve({ header: { height: 5 } });
+  });
+
+  const queryClient = createTestQueryClient({
+    retry: 2, // Override for this test
+  });
+
+  const { result } = renderHook(() => useBlock(5), { wrapper });
+
+  await waitFor(() => {
+    expect(result.current.isSuccess).toBe(true);
+    expect(attemptCount).toBe(2);
+  });
+});
+```
+
+## Testing Cache Behavior
+
+Verify caching works correctly:
+
+```typescript
+test('uses cache on second call', async () => {
+  const queryClient = createTestQueryClient();
+  rpc.block.mockResolvedValue({ header: { height: 5 } });
+
+  // 1. First hook call
+  const { result: result1 } = renderHook(
+    () => useBlock(5), 
+    { wrapper: createWrapper(queryClient) }
+  );
+
+  await waitFor(() => expect(result1.current.isSuccess).toBe(true));
+
+  // 2. Second hook call - should use cache
+  const { result: result2 } = renderHook(
+    () => useBlock(5), 
+    { wrapper: createWrapper(queryClient) }
+  );
+
+  // Should be available immediately (cached)
+  expect(result2.current.data).toBeDefined();
+
+  // RPC should only be called once
+  expect(rpc.block).toHaveBeenCalledTimes(1);
+});
+```
+
+## Testing Cache Invalidation
+
+Verify cache is properly cleared/updated:
+
+```typescript
+test('invalidates cache correctly', async () => {
+  const queryClient = createTestQueryClient();
+  
+  rpc.block.mockResolvedValue({ header: { height: 5, timestamp: 100 } });
+
+  // 1. Initial load
+  const { rerender } = render(
+    <QueryClientProvider client={queryClient}>
+      <BlockComponent height={5} />
+    </QueryClientProvider>
+  );
+
+  await waitFor(() => expect(rpc.block).toHaveBeenCalledTimes(1));
+
+  // 2. Invalidate cache
+  queryClient.invalidateQueries({ queryKey: nearKeys.block(5) });
+
+  // 3. Should refetch
+  await waitFor(() => expect(rpc.block).toHaveBeenCalledTimes(2));
+});
+```
+
+## Testing Hook Lifecycle
+
+Test hook behavior during component lifecycle:
+
+```typescript
+test('cleans up on unmount', async () => {
+  const queryClient = createTestQueryClient();
+  const { unmount } = renderHook(
+    () => useBlock(5),
+    { wrapper: createWrapper(queryClient) }
+  );
+
+  await waitFor(() => {
+    expect(rpc.block).toHaveBeenCalled();
+  });
+
+  unmount();
+
+  // Optional: verify cleanup behavior
+  // (e.g., abort requests, cancel timers)
+});
+```
+
+## Integration Testing Pattern
+
+Test full components with data fetching:
+
+```typescript
+test('BlockList displays recent blocks', async () => {
+  rpc.block.mockResolvedValue({
+    header: { height: 100 },
+    transactions: [],
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BlockList />
+    </QueryClientProvider>
+  );
+
+  // 1. Should show loading
+  expect(screen.getByRole('status')).toHaveTextContent('Loading');
+
+  // 2. Should display blocks
+  await screen.findByText(/Block #100/);
+
+  // 3. Should update when new block arrives
+  rpc.block.mockResolvedValue({
+    header: { height: 101 },
+    transactions: [],
+  });
+
+  queryClient.invalidateQueries({ queryKey: nearKeys.latestBlock() });
+
+  await screen.findByText(/Block #101/);
+});
+```
+
+## Performance Testing
+
+Monitor query performance:
+
+```typescript
+test('queries don\'t run unnecessarily', async () => {
+  const queryClient = createTestQueryClient();
+  
+  const { rerender } = renderHook(
+    () => useBlock(5),
+    { wrapper: createWrapper(queryClient) }
+  );
+
+  await waitFor(() => expect(rpc.block).toHaveBeenCalled());
+  const initialCalls = rpc.block.mock.calls.length;
+
+  // Rerender with same props
+  rerender();
+
+  // Should NOT trigger new network request (uses cache)
+  expect(rpc.block).toHaveBeenCalledTimes(initialCalls);
+});
+```
+
+## Debugging Failed Tests
+
+When tests fail, check:
+
+1. **Mock setup**: Is the mock returning the right data?
+2. **Async timing**: Did you use `waitFor` correctly?
+3. **Query key**: Does the key match between test and implementation?
+4. **Cache state**: Is cache being carried over between tests?
+5. **Retry behavior**: Are retries causing unexpected delays?
+
+Use `act()` wrapper if you get "not wrapped in act(...)" warnings:
+
+```typescript
+import { act } from '@testing-library/react';
+
+await act(async () => {
+  await waitFor(() => {
+    expect(result.current.isSuccess).toBe(true);
+  });
+});
+```

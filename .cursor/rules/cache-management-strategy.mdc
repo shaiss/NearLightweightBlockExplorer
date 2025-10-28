@@ -1,0 +1,204 @@
+---
+globs: pages/Settings.tsx,lib/queryPersister.ts,lib/*Persister*.ts
+description: Cache Management and Persistence Strategy
+---
+
+# Cache Management Strategy
+
+## Cache Lifecycle Configuration
+
+Define cache behavior at provider setup with clear intent:
+
+```typescript
+// staleTime: Data is fresh for this duration
+// - 0ms: Always stale, refetch immediately
+// - 3000ms: Fresh for 3 seconds
+// - Infinity: Never becomes stale (must be manually invalidated)
+
+// gcTime: Garbage collection time
+// - Unused data is deleted after this duration
+// - 10 minutes default: Good for typical apps
+// - Shorter: Lower memory usage, more refetches
+// - Longer: More memory usage, smoother UX
+
+// refetchOnMount: When component mounts, should we refetch?
+// - true: Always refetch on mount
+// - false: Use cache if available
+// - 'stale': Only refetch if data is stale
+
+// refetchOnWindowFocus: Background refetch when tab regains focus?
+// - true: Yes, always refetch
+// - false: No, use cache
+// - 'stale': Only if stale
+```
+
+## Persistence Layer Pattern
+
+Create a persister layer to survive page refreshes:
+
+```typescript
+// lib/queryPersister.ts
+import { createSyncStoragePersister } from '@tanstack/query-persist-client-core';
+
+export const createQueryPersister = () => {
+  return createSyncStoragePersister({
+    storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
+  });
+};
+```
+
+- **sessionStorage**: Persists across page refresh, cleared on browser close
+- **localStorage**: Persists across sessions, careful with size limits
+- **Memory only**: No persistence (good for testing)
+
+## Cache Invalidation Patterns
+
+### Full Invalidation
+Use when you need to clear everything and refetch from scratch:
+
+```typescript
+// Clear ALL cache
+queryClient.clear();
+
+// Clear by key pattern
+queryClient.removeQueries({ queryKey: nearKeys.all });
+queryClient.removeQueries({ queryKey: nearKeys.blocks() });
+queryClient.removeQueries({ queryKey: nearKeys.transactions() });
+```
+
+### Selective Invalidation
+Use when specific data changed:
+
+```typescript
+// Invalidate but keep cached data
+queryClient.invalidateQueries({ 
+  queryKey: nearKeys.block(5) 
+});
+
+// Refetch in background
+queryClient.refetchQueries({ 
+  queryKey: nearKeys.blocks() 
+});
+```
+
+### Incremental Updates
+Use when adding new data to existing cache:
+
+```typescript
+// Update specific query data without refetching
+queryClient.setQueryData(
+  nearKeys.block(5),
+  (old) => ({ ...old, ...newData })
+);
+
+// Merge new transactions with existing
+queryClient.setQueryData(
+  nearKeys.recentTransactions(),
+  (old) => [...(old || []), ...newTransactions]
+);
+```
+
+## Settings/Cache Management UI
+
+Add user control over cache in Settings component:
+
+```typescript
+// Display cache statistics
+- Count of cached blocks
+- Count of cached transactions
+- Approximate cache size
+- Last update timestamp
+
+// Provide cache actions
+- "Clear All" - Wipe everything
+- "Clear Blocks" - Clear only block cache
+- "Clear Transactions" - Clear only transaction cache
+- "Refresh Now" - Manually trigger refetch
+
+// Show cache state
+- Is cache persistent? (sessionStorage, localStorage, etc.)
+- Memory usage estimate
+- Garbage collection schedule
+```
+
+## Background Sync Pattern
+
+For keeping data fresh while user is away:
+
+```typescript
+// Enable background refetching
+const { data } = useQuery({
+  queryKey: nearKeys.latestBlock(),
+  queryFn: fetchLatestBlock,
+  refetchInterval: 3000,        // Refetch every 3 seconds
+  refetchIntervalInBackground: true, // Continue even in background tab
+});
+```
+
+Use cases:
+- Latest block height: Poll frequently to catch new blocks
+- Account balance: Poll less frequently
+- Transaction status: Poll until confirmed, then stop
+
+## Memory Management
+
+Consider these patterns to prevent memory bloat:
+
+```typescript
+// 1. Aggressive garbage collection for large datasets
+const gcTime = 1000 * 60 * 5; // 5 minutes instead of default 10
+
+// 2. Limit concurrent queries
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      gcTime: 5 * 60 * 1000,
+      networkMode: 'always',
+      retry: 1,
+      retryDelay: 1000,
+    },
+  },
+});
+
+// 3. Use pagination to limit result set size
+// Don't fetch all transactions ever - use pagination
+
+// 4. Manual cleanup on unmount for large components
+useEffect(() => {
+  return () => {
+    queryClient.removeQueries({ queryKey: ['expensiveQuery'] });
+  };
+}, []);
+```
+
+## Error Recovery Patterns
+
+Handle network errors gracefully:
+
+```typescript
+// Automatic retry with exponential backoff
+const query = useQuery({
+  queryFn: fetchData,
+  retry: 3,           // Retry up to 3 times
+  retryDelay: (attempt) => 1000 * Math.pow(2, attempt), // 1s, 2s, 4s
+});
+
+// Manual retry from UI
+const { refetch } = useQuery(/* ... */);
+<button onClick={() => refetch()}>Retry</button>
+
+// Offline detection
+const [isOnline, setIsOnline] = useState(true);
+useEffect(() => {
+  window.addEventListener('online', () => setIsOnline(true));
+  window.addEventListener('offline', () => setIsOnline(false));
+}, []);
+```
+
+## Testing Cache Management
+
+When testing:
+- Create a fresh QueryClient for each test
+- Don't share cache between tests
+- Use `queryClient.clear()` between tests
+- Mock network responses consistently

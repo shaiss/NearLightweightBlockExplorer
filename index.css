@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* NEAR Brand Colors */
+    --near-green: #00c6a7;
+    --near-black: #000000;
+    --near-white: #ffffff;
+    --near-gray: #f2f1e9;
+    --near-coral: #ff7866;
+    --near-purple: #a797d7;
+    --near-cyan: #17d8d4;
+    
+    /* Light Mode Theme */
+    --background: #ffffff;
+    --background-secondary: #f2f1e9;
+    --foreground: #000000;
+    --foreground-secondary: #666666;
+    --border: #e5e5e5;
+    --card: #ffffff;
+    --card-foreground: #000000;
+    --primary: #00c6a7;
+    --primary-foreground: #ffffff;
+    --secondary: #f2f1e9;
+    --secondary-foreground: #000000;
+    --accent: #17d8d4;
+    --accent-foreground: #000000;
+    --muted: #f2f1e9;
+    --muted-foreground: #666666;
+    --destructive: #ff7866;
+    --destructive-foreground: #ffffff;
+  }
+  
+  .dark {
+    /* Dark Mode Theme */
+    --background: #000000;
+    --background-secondary: #1a1a1a;
+    --foreground: #ffffff;
+    --foreground-secondary: #a0a0a0;
+    --border: #2a2a2a;
+    --card: #1a1a1a;
+    --card-foreground: #ffffff;
+    --primary: #00c6a7;
+    --primary-foreground: #000000;
+    --secondary: #2a2a2a;
+    --secondary-foreground: #ffffff;
+    --accent: #17d8d4;
+    --accent-foreground: #000000;
+    --muted: #2a2a2a;
+    --muted-foreground: #a0a0a0;
+    --destructive: #ff7866;
+    --destructive-foreground: #ffffff;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--background);
+  color: var(--foreground);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+

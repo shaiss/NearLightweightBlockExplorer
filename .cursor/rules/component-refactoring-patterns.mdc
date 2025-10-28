@@ -1,0 +1,86 @@
+---
+globs: pages/**,components/**
+description: Component Refactoring to Data Fetching Libraries
+---
+
+# Component Refactoring Patterns
+
+## Progressive Refactoring Strategy
+
+When migrating components to use a new data fetching library:
+
+1. **Identify What to Remove**:
+   - Manual `useState` for API responses (data, loading, error)
+   - Manual `useEffect` with fetch calls
+   - Manual polling intervals and retry logic
+   - Manual error handling and loading state management
+
+2. **Identify What to Keep**:
+   - UI-only state (UI toggles, filters, selections, visibility)
+   - User input state (form values, search terms)
+   - Local visual state (animations, open/closed states)
+   - Component-specific business logic that's not data-fetching
+
+3. **Refactoring Checklist**:
+   ```typescript
+   // ❌ Remove these patterns:
+   const [data, setData] = useState(null);
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState(null);
+   useEffect(() => { fetchData().then(setData) }, []);
+
+   // ✅ Replace with:
+   const { data, isPending: loading, error } = useCustomQuery();
+   // or for hooks that return { isLoading, isFetching }
+   const { data, isLoading: loading, error } = useCustomQuery();
+   ```
+
+4. **UI State Remains Local**:
+   ```typescript
+   // ✅ Keep these - they're UI state, not data state
+   const [selectedBlock, setSelectedBlock] = useState(null);
+   const [hideZeroTxBlocks, setHideZeroTxBlocks] = useState(false);
+   const [searchTerm, setSearchTerm] = useState('');
+   ```
+
+## Component-Type Specific Patterns
+
+### Data List Components (BlockList, TransactionList)
+- Use hooks to fetch list data
+- Keep filtering/sorting logic client-side on cached data
+- Maintain scroll position separately from data state
+- Keep pagination UI state local
+
+### Detail/Inspector Components
+- Use hooks to fetch data by ID/parameter
+- Cache key should include the ID to enable parallel requests
+- Loading state applies to that specific item
+
+### Settings/Admin Components
+- Add cache management UI alongside other settings
+- Use library-provided methods to clear/invalidate caches
+- Display cache statistics if available
+- Provide user control over cache lifecycle
+
+## Incremental Loading Pattern
+
+For components that load data progressively:
+
+1. Maintain `lastProcessedHeight` or similar in component state
+2. On refresh, use query key that includes the range
+3. Use library's `setQueryData` or similar to merge with existing cache
+4. Preserve user's scroll position and visible items
+
+Example:
+```typescript
+const [lastProcessedHeight, setLastProcessedHeight] = useState(initialHeight);
+// On new data: update lastProcessedHeight and merge with cached data
+```
+
+## Error Handling
+
+Maintain consistent error handling:
+- Display error from query hook if available
+- Provide retry mechanism
+- Show toast notifications for user-facing errors
+- Log to console/monitoring for debugging

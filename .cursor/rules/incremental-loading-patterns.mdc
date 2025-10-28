@@ -1,0 +1,312 @@
+---
+globs: pages/TransactionList.tsx,pages/BlockList.tsx
+description: Incremental and Progressive Loading Patterns
+---
+
+# Incremental Loading Patterns
+
+## Pattern Overview
+
+Incremental/progressive loading is useful when:
+- Fetching large datasets that arrive continuously (blockchain blocks/transactions)
+- User wants to see data immediately without waiting for full load
+- New data arrives constantly and old data is less relevant
+- Memory management is a concern (don't load everything at once)
+
+## Architecture Pattern
+
+```
+Initial State → Load First Batch → User Views → Poll for Updates → Merge New Data
+     |              (20 blocks)       |              (every 3s)         |
+     └─────────────────────────────────────────────────────────────────┘
+                    Maintain in Query Cache
+```
+
+## Implementation Steps
+
+### 1. Track Loading Range
+
+Maintain state for what data you've already fetched:
+
+```typescript
+const [lastProcessedHeight, setLastProcessedHeight] = useState(initialHeight);
+const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+// On initial load: fetch blocks from [height - 19 to height]
+// On refresh: only fetch [lastProcessedHeight + 1 to newHeight]
+```
+
+### 2. Smart Query Strategy
+
+Use query keys that include the range being fetched:
+
+```typescript
+export const nearKeys = {
+  // ... other keys ...
+  transactionRange: (from: number, to: number) => 
+    [...nearKeys.transactions(), { from, to }] as const,
+};
+
+// Query fetches a specific range
+const { data: newTransactions } = useQuery({
+  queryKey: nearKeys.transactionRange(startHeight, endHeight),
+  queryFn: () => fetchTransactionsInRange(startHeight, endHeight),
+  enabled: startHeight <= endHeight, // Only fetch if range is valid
+});
+```
+
+### 3. Merge with Existing Cache
+
+Combine new data with cached data:
+
+```typescript
+// After receiving new transactions
+queryClient.setQueryData(
+  nearKeys.recentTransactions(),
+  (oldData) => {
+    if (!oldData) return newTransactions;
+    
+    // Merge: new data first (more recent), then old data
+    const combined = [...newTransactions, ...oldData];
+    
+    // Deduplicate if needed
+    const unique = Array.from(
+      new Map(combined.map(tx => [tx.hash, tx])).values()
+    );
+    
+    return unique;
+  }
+);
+
+setLastProcessedHeight(endHeight);
+```
+
+### 4. Manage Scroll Position
+
+Prevent scroll jumps when new data arrives:
+
+```typescript
+const [scrollTop, setScrollTop] = useState(0);
+const containerRef = useRef<HTMLDivElement>(null);
+
+const handleScroll = () => {
+  if (containerRef.current) {
+    setScrollTop(containerRef.current.scrollTop);
+  }
+};
+
+useEffect(() => {
+  // Restore scroll position after new data is rendered
+  if (containerRef.current) {
+    containerRef.current.scrollTop = scrollTop;
+  }
+}, [transactions]); // Adjust deps based on your data
+```
+
+## Component Pattern Example
+
+### TransactionList with Incremental Loading
+
+```typescript
+export function TransactionList() {
+  // Data fetching
+  const { data: latestBlock } = useLatestBlock(3000);
+  const [lastProcessedHeight, setLastProcessedHeight] = useState(
+    latestBlock?.header.height || 0
+  );
+
+  // UI state
+  const [selectedAccount, setSelectedAccount] = useState('');
+  const [scrollTop, setScrollTop] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Initial load
+  useEffect(() => {
+    if (!latestBlock) return;
+    
+    const startHeight = Math.max(latestBlock.header.height - 19, 0);
+    queryClient.setQueryData(
+      nearKeys.recentTransactions(),
+      (old) => old || []
+    );
+    fetchAndMergeTransactions(startHeight, latestBlock.header.height);
+  }, [latestBlock?.header.height]);
+
+  // Incremental updates
+  useEffect(() => {
+    if (!latestBlock || latestBlock.header.height <= lastProcessedHeight) {
+      return;
+    }
+
+    // Save scroll position before update
+    if (containerRef.current) {
+      setScrollTop(containerRef.current.scrollTop);
+    }
+
+    const startHeight = lastProcessedHeight + 1;
+    const endHeight = latestBlock.header.height;
+    
+    fetchAndMergeTransactions(startHeight, endHeight);
+  }, [latestBlock?.header.height, lastProcessedHeight]);
+
+  const fetchAndMergeTransactions = async (from: number, to: number) => {
+    const txs = await rpc.getTransactionsBetweenHeights(from, to);
+    
+    queryClient.setQueryData(
+      nearKeys.recentTransactions(),
+      (old) => mergeTransactions(txs, old)
+    );
+    
+    setLastProcessedHeight(to);
+  };
+
+  const transactions = queryClient.getQueryData(nearKeys.recentTransactions());
+
+  return (
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      style={{ height: '100%', overflow: 'auto' }}
+    >
+      {/* Filter UI - client-side on cached data */}
+      <input
+        value={selectedAccount}
+        onChange={(e) => setSelectedAccount(e.target.value)}
+        placeholder="Filter by account..."
+      />
+
+      {/* Display filtered transactions */}
+      {transactions
+        .filter(tx => !selectedAccount || tx.signer === selectedAccount)
+        .map(tx => (
+          <TransactionRow key={tx.hash} transaction={tx} />
+        ))}
+    </div>
+  );
+}
+```
+
+## Performance Optimization
+
+### Avoid Over-Fetching
+
+```typescript
+// ❌ Don't fetch all transactions since genesis
+const allTxs = await fetchAllTransactions();
+
+// ✅ Fetch only recent ones
+const recentTxs = await fetchTransactionsBetweenHeights(
+  currentHeight - 19,
+  currentHeight
+);
+```
+
+### Batch Merging
+
+```typescript
+// ❌ Update cache for every new transaction
+newTransactions.forEach(tx => {
+  queryClient.setQueryData([...], old => [...old, tx]);
+});
+
+// ✅ Batch merge in one operation
+queryClient.setQueryData(
+  nearKeys.recentTransactions(),
+  old => [...newTransactions, ...old]
+);
+```
+
+### Pagination Alternative
+
+For very large datasets, consider pagination instead:
+
+```typescript
+// Use page-based loading
+const [page, setPage] = useState(1);
+const pageSize = 50;
+
+const { data: transactions } = useQuery({
+  queryKey: nearKeys.transactionsPage(page, pageSize),
+  queryFn: () => fetchTransactionsPage(page, pageSize),
+});
+
+// User clicks "Load More"
+<button onClick={() => setPage(p => p + 1)}>Load More</button>
+```
+
+## Debugging Incremental Loading
+
+### Common Issues
+
+1. **Duplicate transactions**: Merge function didn't deduplicate
+   - Solution: Use unique identifiers, Map-based deduplication
+
+2. **Data goes backward**: New fetches retrieve old data
+   - Solution: Ensure query only fetches new height range
+
+3. **Scroll jumps**: New data causes layout shift
+   - Solution: Restore scroll position after render
+
+4. **Memory bloat**: Never clearing old data
+   - Solution: Implement max-size limit or use pagination
+
+5. **Missed updates**: Race condition between polls
+   - Solution: Use `lastProcessedHeight` to avoid gaps
+
+### Debug Logging
+
+Add logging to track loading behavior:
+
+```typescript
+const fetchAndMergeTransactions = async (from: number, to: number) => {
+  console.log(`[TxList] Fetching range: ${from}-${to}`);
+  const txs = await rpc.getTransactionsBetweenHeights(from, to);
+  console.log(`[TxList] Got ${txs.length} new transactions`);
+  
+  queryClient.setQueryData(nearKeys.recentTransactions(), (old) => {
+    const merged = mergeTransactions(txs, old);
+    console.log(`[TxList] Merged to ${merged.length} total`);
+    return merged;
+  });
+  
+  setLastProcessedHeight(to);
+  console.log(`[TxList] Updated lastProcessedHeight to ${to}`);
+};
+```
+
+## Testing Incremental Loading
+
+```typescript
+test('incrementally loads transactions', async () => {
+  const queryClient = createTestQueryClient();
+  rpc.getTransactionsBetweenHeights
+    .mockResolvedValueOnce([tx1, tx2, tx3]) // Initial load
+    .mockResolvedValueOnce([tx4, tx5]);      // Next batch
+
+  const { rerender } = render(
+    <QueryClientProvider client={queryClient}>
+      <TransactionList />
+    </QueryClientProvider>
+  );
+
+  // Should show first 3 transactions
+  await waitFor(() => {
+    expect(screen.getByText(tx1.hash)).toBeInTheDocument();
+    expect(screen.getByText(tx3.hash)).toBeInTheDocument();
+  });
+
+  // Simulate new block
+  queryClient.setQueryData(
+    nearKeys.latestBlock(),
+    { header: { height: 105 } }
+  );
+
+  // Should merge new transactions
+  await waitFor(() => {
+    expect(screen.getByText(tx4.hash)).toBeInTheDocument();
+    expect(screen.getByText(tx5.hash)).toBeInTheDocument();
+    // Old ones should still be there
+    expect(screen.getByText(tx1.hash)).toBeInTheDocument();
+  });
+});
+```

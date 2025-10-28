@@ -1,67 +1,37 @@
 {
+  "name": "near-lightweight-explorer",
   "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
-    "prettier": "prettier --check '**/*.{js,jsx,ts,tsx,json}'",
-    "prettier:write": "prettier --write '**/*.{js,jsx,ts,tsx,json}'",
-    "lint": "eslint . --ext .js,.json,.jsx,.ts,.tsx",
-    "lint:fix": "eslint --fix . --ext .js,.json,.jsx,.ts,.tsx",
-    "docker:up:testnet": "ENV=testnet docker-compose up",
-    "docker:up:mainnet": "ENV=mainnet docker-compose up",
-    "docker:up:shardnet": "ENV=shardnet docker-compose up",
-    "docker:up:guildnet": "ENV=guildnet docker-compose up",
-    "typecheck": "npm run -w frontend typecheck && npm run -w backend typecheck",
-    "build": "npm run -w frontend build && npm run -w backend build",
-    "start": "concurrently \"npm run -w frontend start\" \"npm run -w backend start:mainnet\"",
-    "postinstall": "patch-package && npm --workspaces --if-present run postinstall",
-    "test:e2e": "playwright test -c frontend"
-  },
-  "workspaces": [
-    "common",
-    "frontend",
-    "backend"
-  ],
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged"
-    }
-  },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx,css,json,md}": [
-      "prettier --write"
-    ],
-    "*.{js,jsx,ts,tsx,json}": [
-      "eslint --fix"
-    ]
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "proxy": "node proxy-server.js",
+    "dev:full": "concurrently \"npm run dev\" \"npm run proxy\""
   },
   "dependencies": {
-    "@explorer/backend": "*",
-    "@explorer/common": "*",
-    "@explorer/frontend": "*",
-    "dotenv-cli": "^5.0.0",
-    "gleap": "^8.4.7",
-    "patch-package": "^6.4.7"
+    "@tanstack/query-persist-client-core": "^5.0.0",
+    "@tanstack/react-query": "^5.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "wouter": "^3.2.0"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "^13.3.1",
-    "@types/webpack": "^5.28.1",
-    "@typescript-eslint/eslint-plugin": "^5.51.0",
-    "@typescript-eslint/parser": "^5.51.0",
-    "concurrently": "^7.2.1",
-    "eslint": "^8.33.0",
-    "eslint-config-airbnb": "^19.0.4",
-    "eslint-config-airbnb-typescript": "^17.0.0",
-    "eslint-config-next": "^13.3.1",
-    "eslint-config-prettier": "^8.6.0",
-    "eslint-plugin-import": "^2.27.5",
-    "eslint-plugin-jsx-a11y": "^6.7.1",
-    "eslint-plugin-no-relative-import-paths": "^1.5.2",
-    "eslint-plugin-react": "^7.32.2",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@typescript-eslint/eslint-plugin": "^6.14.0",
+    "@typescript-eslint/parser": "^6.14.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^9.2.1",
+    "eslint": "^8.55.0",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "husky": "^2.3.0",
-    "jsonc-eslint-parser": "^2.1.0",
-    "lint-staged": "^11.0.0",
-    "prettier": "2.8.8",
-    "start-server-and-test": "^1.14.0",
-    "typescript": "^4.9.5"
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.8"
   }
 }

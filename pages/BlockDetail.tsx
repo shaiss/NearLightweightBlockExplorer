@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Layout from "@/components/Layout";
-import { Block, nearRpc } from "@/lib/nearRpc";
+import { Block, nearRpc } from "@/lib/nearRpcFailover";
 import { useEffect, useState } from "react";
 import { Link, useParams, useLocation } from "wouter";
 
@@ -37,7 +37,7 @@ export default function BlockDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg">Loading block...</div>
+        <div className="text-lg text-foreground">Loading block...</div>
       </div>
     );
   }
@@ -49,7 +49,7 @@ export default function BlockDetail() {
           Error: {error || 'Block not found'}
         </div>
         <Link href="/blocks">
-          <Button>Back to Blocks</Button>
+          <Button className="bg-near-green hover:bg-near-cyan text-white">Back to Blocks</Button>
         </Link>
       </div>
     );
@@ -60,51 +60,51 @@ export default function BlockDetail() {
       <div className="space-y-4">
       <div className="flex items-center gap-4">
         <Link href="/blocks">
-          <Button variant="outline">← Back</Button>
+          <Button variant="outline" className="border-border hover:border-near-green hover:text-near-green">← Back</Button>
         </Link>
-        <h1 className="text-3xl font-bold">Block #{block.header.height}</h1>
+        <h1 className="text-3xl font-bold text-near-green">Block #{block.header.height}</h1>
       </div>
 
       <div className="grid gap-4">
-        <Card>
+        <Card className="border-border bg-card">
           <CardHeader>
-            <CardTitle>Block Information</CardTitle>
+            <CardTitle className="text-near-green">Block Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <div className="text-sm text-muted-foreground">Height</div>
-                <div className="font-mono font-semibold">{block.header.height}</div>
+                <div className="font-mono font-semibold text-near-green">{block.header.height}</div>
               </div>
               <div className="md:col-span-2">
                 <div className="text-sm text-muted-foreground">Timestamp</div>
-                <div>{nearRpc.formatTimestamp(block.header.timestamp_nanosec)}</div>
+                <div className="text-foreground">{nearRpc.formatTimestamp(block.header.timestamp_nanosec)}</div>
               </div>
             </div>
 
             <div>
               <div className="text-sm text-muted-foreground">Hash</div>
-              <div className="font-mono text-sm break-all">{block.header.hash}</div>
+              <div className="font-mono text-sm break-all text-foreground">{block.header.hash}</div>
             </div>
 
             <div>
               <div className="text-sm text-muted-foreground">Previous Hash</div>
-              <div className="font-mono text-sm break-all">{block.header.prev_hash}</div>
+              <div className="font-mono text-sm break-all text-foreground">{block.header.prev_hash}</div>
             </div>
 
             <div>
               <div className="text-sm text-muted-foreground">Author</div>
-              <div className="font-mono">{block.author}</div>
+              <div className="font-mono text-foreground">{block.author}</div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="text-sm text-muted-foreground">Gas Price</div>
-                <div className="font-mono">{block.header.gas_price}</div>
+                <div className="font-mono text-foreground">{block.header.gas_price}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Total Supply</div>
-                <div className="font-mono">
+                <div className="font-mono text-near-green">
                   {nearRpc.formatNear(block.header.total_supply)} NEAR
                 </div>
               </div>
@@ -112,9 +112,9 @@ export default function BlockDetail() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border bg-card">
           <CardHeader>
-            <CardTitle>Chunks ({block.chunks.length})</CardTitle>
+            <CardTitle className="text-near-cyan">Chunks (<span className="text-near-green">{block.chunks.length}</span>)</CardTitle>
           </CardHeader>
           <CardContent>
             {block.chunks.length === 0 ? (
@@ -124,16 +124,16 @@ export default function BlockDetail() {
                 {block.chunks.map((chunk, idx) => (
                   <div
                     key={idx}
-                    className="p-3 border rounded-lg space-y-2"
+                    className="p-3 border border-border bg-background-secondary rounded-lg space-y-2"
                   >
                     <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">Chunk {idx}</span>
+                      <span className="text-sm font-medium text-near-green">Chunk {idx}</span>
                       <span className="text-xs text-muted-foreground font-mono">
                         {chunk.chunk_hash}
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Shard: {chunk.shard_id}
+                      Shard: <span className="text-foreground">{chunk.shard_id}</span>
                     </div>
                   </div>
                 ))}
@@ -147,6 +147,7 @@ export default function BlockDetail() {
             <Button
               variant="outline"
               onClick={() => setLocation(`/block/${block.header.height - 1}`)}
+              className="border-border hover:border-near-green hover:text-near-green"
             >
               ← Previous Block
             </Button>
@@ -154,6 +155,7 @@ export default function BlockDetail() {
           <Button
             variant="outline"
             onClick={() => setLocation(`/block/${block.header.height + 1}`)}
+            className="border-border hover:border-near-green hover:text-near-green"
           >
             Next Block →
           </Button>

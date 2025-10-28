@@ -1,0 +1,149 @@
+---
+globs: lib/nearQueries.ts,lib/*Query*.ts,lib/*Queries*.ts
+description: Query Hooks Organization and Key Factory Patterns
+---
+
+# Query Hooks Organization Pattern
+
+## File Structure
+
+All query hooks go in `lib/` directory with clear naming:
+
+- `lib/nearQueries.ts`: Main file with query hooks and key factories
+- `lib/queryPersister.ts`: Persistence layer (if applicable)
+- `lib/rpcProxy.ts` or similar: Low-level API communication
+
+## Query Key Factory Pattern
+
+Organize query keys hierarchically for better cache management:
+
+```typescript
+export const nearKeys = {
+  all: ['near'] as const,
+  blocks: () => [...nearKeys.all, 'blocks'] as const,
+  block: (height: number) => [...nearKeys.blocks(), height] as const,
+  blockTransactions: (height: number) => [...nearKeys.block(height), 'transactions'] as const,
+  transactions: () => [...nearKeys.all, 'transactions'] as const,
+  recentTransactions: () => [...nearKeys.transactions(), 'recent'] as const,
+  // Add more as needed for your domain
+};
+```
+
+Benefits:
+- `nearKeys.all` allows clearing ALL near-related caches at once
+- `nearKeys.blocks()` clears all block queries
+- `nearKeys.block(5)` clears only queries for block 5
+- Enables fine-grained cache invalidation
+
+## Hook Naming Conventions
+
+- `useLatestXxx()`: Auto-refreshing hook that polls for latest data
+- `useXxx()`: Static query hook for a specific resource
+- `useXxxList()` or `useXxxs()`: Multiple items fetched at once
+- `useIncrementalXxx()`: Special pattern for progressive loading
+
+Example:
+```typescript
+export function useLatestBlock(refetchInterval?: number) {
+  return useQuery({
+    queryKey: nearKeys.latestBlock(),
+    queryFn: () => rpc.block({ finality: 'final' }),
+    refetchInterval: refetchInterval ?? 3000,
+  });
+}
+
+export function useBlock(height: number) {
+  return useQuery({
+    queryKey: nearKeys.block(height),
+    queryFn: () => rpc.block({ blockId: height }),
+  });
+}
+```
+
+## Hook Parameter Guidelines
+
+1. **Required parameters**: Pass as function arguments
+2. **Optional parameters**: Accept object with clear names
+3. **Configuration**: Only include overrideable settings in hook params
+
+```typescript
+// ✅ Good: Clear parameters
+export function useBlock(height: number, options?: { refetchInterval?: number }) {
+  // ...
+}
+
+// ❌ Avoid: Too many parameters
+export function useBlock(height, refetch, stale, gc, retry, timeout) {
+  // ...
+}
+```
+
+## Implementation Pattern
+
+Each hook should:
+
+1. Define the query key using the key factory
+2. Define the queryFn that calls the API/RPC
+3. Configure appropriate default options
+4. Return the query result
+
+```typescript
+export function useBlockTransactions(height: number) {
+  return useQuery({
+    queryKey: nearKeys.blockTransactions(height),
+    queryFn: async () => {
+      const block = await rpc.block({ blockId: height });
+      return block.transactions || [];
+    },
+    staleTime: 3000,
+    // other options...
+  });
+}
+```
+
+## Reusable Hook Patterns
+
+### Batch Query Pattern (useQueries)
+
+For fetching multiple items in parallel:
+
+```typescript
+export function useRecentBlocks(count: number) {
+  const { data: latest } = useLatestBlock();
+  
+  return useQueries({
+    queries: Array.from({ length: count }, (_, i) => ({
+      queryKey: nearKeys.block(latest.header.height - i),
+      queryFn: () => rpc.block({ blockId: latest.header.height - i }),
+    })),
+  });
+}
+```
+
+### Dependent Query Pattern
+
+For queries that depend on other query results:
+
+```typescript
+export function useBlockWithTransactions(height: number) {
+  const blockQuery = useBlock(height);
+  
+  // This only runs after block loads
+  const txQuery = useBlockTransactions(height);
+  
+  return {
+    block: blockQuery.data,
+    transactions: txQuery.data,
+    isLoading: blockQuery.isLoading || txQuery.isLoading,
+    error: blockQuery.error || txQuery.error,
+  };
+}
+```
+
+## Export Organization
+
+Export in this order for clarity:
+1. Query key factory
+2. Type definitions (if any)
+3. Individual hooks
+4. Batch/combination hooks

@@ -1,0 +1,227 @@
+---
+globs: package.json,package-lock.json
+description: Dependency Migration and Library Integration Patterns
+---
+
+# Dependency Migration Patterns
+
+## Adding New Dependencies
+
+When adding a data fetching or state management library:
+
+1. **Document the rationale** in a comment in `package.json`:
+   ```json
+   {
+     "dependencies": {
+       "@tanstack/react-query": "^5.0.0", // Auto-caching, deduplication, background refetch
+       "@tanstack/query-persist-client-core": "^5.0.0" // Session persistence
+     }
+   }
+   ```
+
+2. **Use semantic versioning**:
+   - `^5.0.0`: Allow minor/patch updates
+   - `~5.0.0`: Only patch updates
+   - `5.0.0`: Exact version (usually for critical libraries)
+
+3. **Install and verify**:
+   ```bash
+   npm install @tanstack/react-query
+   npm list @tanstack/react-query
+   ```
+
+## Breaking Changes Checklist
+
+When upgrading a major version:
+
+- [ ] Read the migration guide
+- [ ] Check for API changes (function signatures)
+- [ ] Update types if needed
+- [ ] Test with previous data (cache compatibility)
+- [ ] Check performance implications
+- [ ] Update rules and documentation
+
+## Gradual Migration Strategy
+
+Don't refactor everything at once. Use a phased approach:
+
+### Phase 1: Setup and Testing
+- Add new library to `package.json`
+- Set up provider in `App.tsx`
+- Create example usage in one component
+- Test thoroughly before expanding
+
+### Phase 2: Core Components
+- Migrate primary data-fetching components first
+- Keep old code alongside new code during transition
+- Test each component thoroughly
+- Get user feedback
+
+### Phase 3: Completion
+- Migrate remaining components
+- Remove old data-fetching code
+- Clean up unused utilities
+- Final testing and performance check
+
+## File Organization During Migration
+
+```
+lib/
+  ├── nearRpc.ts (old - API calls)
+  ├── rpcProxy.ts (old - proxy layer)
+  ├── nearQueries.ts (new - query hooks)
+  ├── queryPersister.ts (new - persistence)
+  └── config.ts (shared - configuration)
+
+pages/
+  ├── BlockList.tsx (NEW PATTERN with queries)
+  ├── TransactionList.tsx (NEW PATTERN with queries)
+  ├── Settings.tsx (updated - cache UI)
+  └── ...
+```
+
+## Compatibility Notes
+
+Document library-specific behaviors:
+
+```typescript
+// lib/config.ts - Central documentation
+
+/**
+ * TanStack Query Configuration
+ * 
+ * Key behaviors to understand:
+ * - Queries are keyed by [namespace, resource, params]
+ * - Stale data is refetched but cached copy shown immediately
+ * - gcTime: Time before unused queries are garbage collected
+ * - Cache survives component unmount/remount if within gcTime
+ * - sessionStorage persister survives page refresh
+ */
+
+export const CACHE_CONFIG = {
+  staleTime: 3000,
+  gcTime: 1000 * 60 * 10,
+  refetchOnMount: 'stale',
+  refetchOnWindowFocus: 'stale',
+  refetchOnReconnect: true,
+};
+```
+
+## Performance Monitoring
+
+After migration, monitor these metrics:
+
+```typescript
+// Add to your logging/monitoring
+queryClient.getQueryCache().getAll().length // Number of cached queries
+// Monitor memory usage
+// Track network request count
+// Check request deduplication rate
+```
+
+## Rollback Plan
+
+If the new library causes problems:
+
+1. Keep git history of old implementation
+2. Have old utilities available temporarily
+3. Can remove gradually after stability verified
+4. Document any workarounds needed
+
+## Version Lock for Stability
+
+For production environments, consider locking versions:
+
+```json
+{
+  "@tanstack/react-query": "5.0.0"  // Not "^5.0.0"
+}
+```
+
+This prevents automatic updates that might introduce bugs.
+
+## Integration with Existing Code
+
+When new library coexists with old patterns:
+
+```typescript
+// lib/rpcProxy.ts - Still used for low-level RPC
+export const rpc = {
+  block: (params) => fetch('/api/block', { body: JSON.stringify(params) }),
+  // ...
+};
+
+// lib/nearQueries.ts - NEW: High-level query hooks
+export function useBlock(height: number) {
+  return useQuery({
+    queryKey: nearKeys.block(height),
+    queryFn: () => rpc.block({ blockId: height }), // Uses old rpc
+  });
+}
+
+// pages/BlockList.tsx - Uses new hooks
+export function BlockList() {
+  const { data: blocks } = useRecentBlocks(20); // Uses new pattern
+  // ...
+}
+```
+
+## Documentation Updates
+
+Create or update documentation:
+
+1. **README.md**: Update data fetching section
+2. **ARCHITECTURE.md**: Add section on cache architecture
+3. **API.md**: Document query hooks API
+4. **TROUBLESHOOTING.md**: Add cache-related troubleshooting
+
+Example:
+```markdown
+## Data Fetching
+
+This project uses TanStack Query (React Query) for:
+- Automatic request deduplication
+- Intelligent caching and garbage collection
+- Background refetching
+- Persistence with sessionStorage
+
+See [Query Hooks](./lib/nearQueries.ts) for available hooks.
+```
+
+## Testing Strategy During Migration
+
+1. **Unit tests**: Test new hooks in isolation
+2. **Integration tests**: Test components with new hooks
+3. **E2E tests**: Test full user flows
+4. **Regression tests**: Ensure old functionality still works
+5. **Performance tests**: Verify no performance degradation
+
+## Common Migration Pitfalls
+
+| Pitfall | Solution |
+|---------|----------|
+| Cache key format inconsistency | Use key factory pattern consistently |
+| Forgetting to setup provider | Add to `App.tsx`, wrap whole app |
+| Manual refetch on component props change | Use dependency arrays in useQuery |
+| Memory leaks | Proper cleanup with gcTime |
+| Race conditions | Use query key for proper deduplication |
+| Stale UI after mutation | Use invalidateQueries or setQueryData |
+
+## Quick Reference
+
+### Check what's using old pattern
+```bash
+grep -r "useState.*loading" pages/
+grep -r "useEffect.*fetch" pages/
+```
+
+### Find all components to migrate
+```bash
+grep -r "manual state management" pages/
+```
+
+### Verify migration complete
+```bash
+# Should be empty after migration
+grep -r "useState.*\[loading\|error\|data\]" pages/ components/
+```

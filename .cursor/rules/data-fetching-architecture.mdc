@@ -1,0 +1,43 @@
+---
+globs: pages/App.tsx,lib/**
+description: Data Fetching Architecture and Provider Setup
+---
+
+# Data Fetching Architecture Pattern
+
+## Provider Setup in App.tsx
+
+When implementing a new data fetching library or cache strategy:
+
+1. **Root Provider Wrapper**: Always establish the provider at the application root in [pages/App.tsx](mdc:pages/App.tsx)
+   - Wrap all child components to ensure global access to cache/context
+   - Document the cache configuration (staleTime, gcTime, refetch behavior)
+
+2. **Configuration Pattern**:
+   ```typescript
+   // 1. Define configuration constants
+   // 2. Create/initialize client with config
+   // 3. Wrap app with Provider
+   // 4. Include persistence layer if needed
+   ```
+
+3. **Cache Lifecycle**:
+   - Define `staleTime`: How long data is considered fresh without refetch
+   - Define `gcTime`: How long cached data persists after no subscribers
+   - Document refetch behavior (background, on-focus, on-reconnect)
+
+## Query/Data Hook Organization
+
+Store all data fetching logic in [lib/](mdc:lib/) directory:
+
+- `lib/nearQueries.ts` (or similar): Query hooks and key factories
+- `lib/queryPersister.ts` (or similar): Persistence layer implementation
+- `lib/rpcProxy.ts`: API/RPC communication layer
+- `lib/config.ts`: Configuration for endpoints and cache behavior
+
+## Provider Lifecycle
+
+Document in code comments:
+- Where persistence is restored on app mount
+- How cache is invalidated or cleared
+- Where background sync/polling is initiated
