@@ -5,6 +5,12 @@ import { nearRpc, NetworkStatus } from "@/lib/nearRpcFailover";
 import { providerManager } from "@/lib/providerManager";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
+import { useRecentBlocks, useBlockTransactionCounts } from "@/lib/nearQueries";
+import { useQueryClient } from "@tanstack/react-query";
+import { nearKeys } from "@/lib/nearQueries";
+import { Transaction } from "@/lib/nearRpcFailover";
+import LatestBlockCard from "@/components/LatestBlockCard";
+import LatestTransactionCard from "@/components/LatestTransactionCard";
 
 export default function Home() {
   const [status, setStatus] = useState<NetworkStatus | null>(null);
@@ -14,6 +20,16 @@ export default function Home() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchError, setSearchError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // Fetch latest 5 blocks for display
+  const { data: recentBlocks = [], isLoading: blocksLoading } = useRecentBlocks(5);
+  const blockHeights = recentBlocks.map((b) => b.header.height);
+  const { data: txCounts = {} } = useBlockTransactionCounts(blockHeights);
+
+  // Get latest transactions from cache
+  const allTransactions = queryClient.getQueryData<Transaction[]>(nearKeys.recentTransactions()) || [];
+  const latestTransactions = allTransactions.slice(0, 5);
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -61,7 +77,9 @@ export default function Home() {
       return;
     }
 
-    // Check if it's a transaction hash (base58 string, typically 44 chars)
+    // For alphanumeric strings (40+ chars), default to transaction hash
+    // Note: Both TX hashes and block hashes are base58-encoded and ~44 chars
+    // The /tx/ page will intelligently try as block hash if TX lookup fails
     if (query.length >= 40 && /^[A-Za-z0-9]+$/.test(query)) {
       setLocation(`/tx/${query}`);
       return;
@@ -79,7 +97,16 @@ export default function Home() {
         <div className="container py-4 flex items-center justify-between">
           <div className="flex items-center gap-8">
             <Link href="/">
-              <h1 className="text-2xl font-bold text-near-green hover:text-near-cyan transition-colors">NEAR Explorer</h1>
+              <div className="flex items-center gap-2 cursor-pointer group">
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="32" height="32" rx="6" fill="currentColor" className="text-near-green group-hover:text-near-cyan transition-colors"/>
+                  <path d="M9 23L14 13L19 23M11.5 19H16.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle cx="23" cy="16" r="2.5" fill="white"/>
+                </svg>
+                <h1 className="text-2xl font-bold text-near-green group-hover:text-near-cyan transition-colors">
+                  Block Explorer
+                </h1>
+              </div>
             </Link>
             <div className="hidden md:flex gap-4">
               <Link href="/blocks">
@@ -98,12 +125,21 @@ export default function Home() {
 
       <main className="container py-12 space-y-8">
         <div className="max-w-4xl mx-auto space-y-8">
-          <div className="text-center space-y-4">
-            <h2 className="text-4xl font-bold bg-gradient-to-r from-near-green to-near-cyan bg-clip-text text-transparent">
-              NEAR Lightweight Block Explorer
+          {/* Hero Section */}
+          <div className="text-center space-y-6 py-8">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-near-green/10 border border-near-green/20">
+              <div className="w-2 h-2 bg-near-green rounded-full animate-pulse"></div>
+              <span className="text-sm font-medium text-near-green capitalize">
+                {currentNetwork} Network
+              </span>
+            </div>
+            
+            <h2 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-near-green via-near-cyan to-near-green bg-clip-text text-transparent leading-tight">
+              Explore the Blockchain
             </h2>
-            <p className="text-lg text-foreground-secondary">
-              Lightweight explorer for NEAR {currentNetwork.charAt(0).toUpperCase() + currentNetwork.slice(1)}
+            
+            <p className="text-xl text-foreground-secondary max-w-2xl mx-auto">
+              Search blocks, transactions, and view real-time network activity on NEAR Protocol
             </p>
           </div>
 
@@ -234,27 +270,76 @@ export default function Home() {
           </Card>
 
           {status && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Link href="/blocks">
-                <Card className="hover:shadow-lg transition-all cursor-pointer border-border hover:border-near-green bg-card">
-                  <CardContent className="pt-6">
-                    <h3 className="text-xl font-bold mb-2 text-near-green">View Blocks</h3>
-                    <p className="text-sm text-foreground-secondary">
-                      Browse recent blocks and their details
-                    </p>
-                  </CardContent>
-                </Card>
-              </Link>
-              <Link href="/transactions">
-                <Card className="hover:shadow-lg transition-all cursor-pointer border-border hover:border-near-cyan bg-card">
-                  <CardContent className="pt-6">
-                    <h3 className="text-xl font-bold mb-2 text-near-cyan">View Transactions</h3>
-                    <p className="text-sm text-foreground-secondary">
-                      Stream recent transactions across blocks
-                    </p>
-                  </CardContent>
-                </Card>
-              </Link>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Latest Blocks Column */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-near-green">Latest Blocks</h3>
+                  <Link href="/blocks">
+                    <span className="text-sm text-near-green hover:text-near-cyan cursor-pointer">
+                      View all →
+                    </span>
+                  </Link>
+                </div>
+                
+                {blocksLoading && recentBlocks.length === 0 ? (
+                  <Card className="border-border bg-card">
+                    <CardContent className="p-8 text-center">
+                      <div className="text-muted-foreground">Loading blocks...</div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-3">
+                    {recentBlocks.map((block) => (
+                      <LatestBlockCard
+                        key={block.header.hash}
+                        block={block}
+                        transactionCount={txCounts[block.header.height] || 0}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Latest Transactions Column */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-near-cyan">Latest Transactions</h3>
+                  <Link href="/transactions">
+                    <span className="text-sm text-near-cyan hover:text-near-green cursor-pointer">
+                      View all →
+                    </span>
+                  </Link>
+                </div>
+                
+                {latestTransactions.length === 0 ? (
+                  <Card className="border-border bg-card">
+                    <CardContent className="p-8 text-center">
+                      <div className="text-muted-foreground">
+                        No recent transactions available
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-2">
+                        Visit the{" "}
+                        <Link href="/transactions">
+                          <span className="text-near-cyan hover:underline cursor-pointer">
+                            transactions page
+                          </span>
+                        </Link>{" "}
+                        to load transactions
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-3">
+                    {latestTransactions.map((tx) => (
+                      <LatestTransactionCard
+                        key={tx.hash}
+                        transaction={tx}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

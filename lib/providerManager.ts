@@ -24,6 +24,8 @@ const STORAGE_KEY_PROVIDERS = 'near_rpc_providers';
 const STORAGE_KEY_CUSTOM = 'near_rpc_custom_providers';
 const STORAGE_KEY_ENABLED = 'near_rpc_enabled_providers';
 const STORAGE_KEY_NETWORK = 'near_rpc_network';
+const STORAGE_KEY_VERSION = 'near_rpc_config_version';
+const CURRENT_CONFIG_VERSION = '2.0'; // Updated to force migration to AWS Localnet
 const GITHUB_PROVIDERS_URL = 'https://raw.githubusercontent.com/near/docs/master/docs/api/rpc/providers.md';
 
 // Fallback static provider list
@@ -41,7 +43,8 @@ const FALLBACK_PROVIDERS: RpcProvider[] = [
   { id: 'testnet-pagoda', name: 'Pagoda Testnet', url: 'https://rpc.testnet.pagoda.co', network: 'testnet', enabled: false, priority: 12 },
   
   // Localnet
-  { id: 'localnet-default', name: 'Localhost:3030', url: 'http://localhost:3030', network: 'localnet', enabled: true, priority: 20 },
+  { id: 'localnet-aws', name: 'AWS Localnet', url: 'http://54.90.246.254:3030', network: 'localnet', enabled: true, priority: 20 },
+  { id: 'localnet-default', name: 'Localhost:3030', url: 'http://localhost:3030', network: 'localnet', enabled: false, priority: 21 },
 ];
 
 class ProviderManager {
@@ -58,6 +61,18 @@ class ProviderManager {
   // Load providers and network from localStorage
   private loadFromStorage(): void {
     try {
+      // Check config version - auto-migrate if outdated
+      const savedVersion = localStorage.getItem(STORAGE_KEY_VERSION);
+      if (savedVersion !== CURRENT_CONFIG_VERSION) {
+        console.log(`Migrating provider config from version ${savedVersion || 'legacy'} to ${CURRENT_CONFIG_VERSION}`);
+        console.log('Resetting to new defaults with AWS Localnet...');
+        this.providers = [...FALLBACK_PROVIDERS];
+        this.customProviders = [];
+        this.selectedNetwork = 'localnet';
+        this.saveToStorage();
+        return;
+      }
+
       // Load selected network
       const savedNetwork = localStorage.getItem(STORAGE_KEY_NETWORK) as NetworkType | null;
       if (savedNetwork && ['mainnet', 'testnet', 'localnet'].includes(savedNetwork)) {
@@ -103,6 +118,7 @@ class ProviderManager {
   // Save to localStorage
   private saveToStorage(): void {
     try {
+      localStorage.setItem(STORAGE_KEY_VERSION, CURRENT_CONFIG_VERSION);
       localStorage.setItem(STORAGE_KEY_PROVIDERS, JSON.stringify(this.providers));
       localStorage.setItem(STORAGE_KEY_CUSTOM, JSON.stringify(this.customProviders));
       localStorage.setItem(STORAGE_KEY_NETWORK, this.selectedNetwork);
