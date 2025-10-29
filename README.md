@@ -57,7 +57,7 @@ URL: http://localhost:3030
 
 Click "Add Provider" to save.
 
-For detailed information on RPC failover, see [RPC_FAILOVER_GUIDE.md](./RPC_FAILOVER_GUIDE.md).
+For detailed information on RPC failover, see [RPC_FAILOVER_GUIDE.md](./docs/guides/RPC_FAILOVER_GUIDE.md).
 
 ## 📖 Usage
 
@@ -102,7 +102,14 @@ npm run preview
 3. **Auto-Switch** - Automatically fails over on network errors (not RPC errors)
 4. **Persistence** - Saves provider preferences to localStorage
 
-See [RPC_FAILOVER_GUIDE.md](./RPC_FAILOVER_GUIDE.md) for technical details.
+See [RPC_FAILOVER_GUIDE.md](./docs/guides/RPC_FAILOVER_GUIDE.md) for technical details.
+
+## 📚 Documentation
+
+- **[Quick Start Guide](./QUICK_START.md)** - Get started quickly
+- **[Development Guides](./docs/guides/)** - RPC failover, dev checklist, quick reference
+- **[Research Notes](./docs/research/)** - NEAR architecture and indexer research
+- **[Archive](./docs/archive/)** - Historical implementation notes
 
 ## 🛠️ Development
 
