@@ -16,8 +16,9 @@ export default defineConfig({
   },
   server: {
     port: FRONTEND_PORT,
+    strictPort: true, // Don't auto-switch ports if the configured port is in use
     proxy: {
-      // Proxy RPC requests to bypass CORS - forwards to standalone proxy server
+      // Proxy RPC requests to CORS-enabled proxy server
       '/rpc-proxy': {
         target: `http://localhost:${PROXY_PORT}`,
         changeOrigin: true,

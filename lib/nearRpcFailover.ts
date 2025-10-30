@@ -203,7 +203,10 @@ class NearRpcFailoverClient {
               responseTime,
             });
             
-            throw new Error(rpcError.message || 'RPC error');
+            // Provide more detailed error message
+            const errorMessage = rpcError.message || 'RPC error';
+            const errorCode = rpcError.code ? ` (code: ${rpcError.code})` : '';
+            throw new Error(`${errorMessage}${errorCode}`);
           }
           
           // Success!
@@ -391,15 +394,69 @@ class NearRpcFailoverClient {
     return `${days} day${days !== 1 ? 's' : ''} ago`;
   }
 
+  /**
+   * Search for a specific transaction hash across recent blocks
+   * Useful for debugging missing transactions
+   */
+  async searchTransactionHash(txHash: string, maxBlocks: number = 1000): Promise<Transaction | null> {
+    try {
+      const latestBlock = await this.getLatestBlock();
+      const startHeight = Math.max(0, latestBlock.header.height - maxBlocks);
+      
+      console.log(`[searchTransactionHash] Searching for ${txHash.substring(0, 16)}... in blocks ${startHeight} to ${latestBlock.header.height}`);
+      
+      // Search backwards through blocks
+      for (let height = latestBlock.header.height; height >= startHeight; height--) {
+        try {
+          const block = await this.getBlock(height);
+          const transactions = await this.getTransactionsFromBlock(block);
+          
+          const found = transactions.find(tx => tx.hash === txHash);
+          if (found) {
+            console.log(`[searchTransactionHash] ✅ Found transaction ${txHash.substring(0, 16)}... in block ${height}`);
+            return found;
+          }
+        } catch (err) {
+          // Skip blocks that fail to fetch
+          continue;
+        }
+      }
+      
+      console.log(`[searchTransactionHash] ❌ Transaction ${txHash.substring(0, 16)}... not found in blocks ${startHeight} to ${latestBlock.header.height}`);
+      return null;
+    } catch (err) {
+      console.error(`[searchTransactionHash] Error searching for transaction:`, err);
+      return null;
+    }
+  }
+
   async getTransactionsFromBlock(block: Block): Promise<Transaction[]> {
     const transactions: Transaction[] = [];
     
-    for (const chunk of block.chunks) {
+    if (!block.chunks || block.chunks.length === 0) {
+      console.log(`[getTransactionsFromBlock] Block ${block.header.height}: No chunks in block`);
+      return transactions;
+    }
+    
+    for (let chunkIdx = 0; chunkIdx < block.chunks.length; chunkIdx++) {
+      const chunk = block.chunks[chunkIdx];
       try {
         const chunkData = await this.getChunk(chunk.chunk_hash);
         
-        if (chunkData.transactions) {
+        if (chunkData.transactions && chunkData.transactions.length > 0) {
+          // Only log when we find transactions, and only for summary purposes (not every chunk)
+          // Use debug level so it doesn't spam production logs
+          if (block.header.height % 100 === 0) { // Only log every 100th block
+            const txCount = chunkData.transactions.length;
+            console.debug(`[getTransactionsFromBlock] Block ${block.header.height}: Found ${txCount} transaction(s) in chunk ${chunkIdx + 1}`);
+          }
+          
           for (const tx of chunkData.transactions) {
+            if (!tx.hash) {
+              console.warn(`[getTransactionsFromBlock] Block ${block.header.height}: Transaction missing hash:`, tx);
+              continue;
+            }
+            
             transactions.push({
               hash: tx.hash,
               signer_id: tx.signer_id,
@@ -411,10 +468,18 @@ class NearRpcFailoverClient {
               timestamp_nanosec: block.header.timestamp_nanosec,
             });
           }
+        } else {
+          // Chunks often have no transactions - this is normal, so we don't log it
         }
       } catch (err) {
-        console.warn(`Failed to fetch chunk ${chunk.chunk_hash}:`, err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[getTransactionsFromBlock] Failed to fetch chunk ${chunk.chunk_hash.substring(0, 8)}... in block ${block.header.height}:`, errorMsg);
       }
+    }
+    
+    // Only log summaries, not every block
+    if (transactions.length > 0 && block.header.height % 100 === 0) {
+      console.debug(`[getTransactionsFromBlock] Block ${block.header.height}: Extracted ${transactions.length} transaction(s)`);
     }
     
     return transactions;

@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import Layout from "@/components/Layout";
 import TransactionInspector from "@/components/TransactionInspector";
 import { Transaction } from "@/lib/nearRpcFailover";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "wouter";
 import { useLatestBlock } from "@/lib/nearQueries";
 import { nearRpc } from "@/lib/nearRpcFailover";
@@ -16,9 +16,7 @@ export default function TransactionList() {
   const [accountFilter, setAccountFilter] = useState("");
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [lastProcessedHeight, setLastProcessedHeight] = useState<number>(0);
-  const [scrollTop, setScrollTop] = useState(0);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // Query client for direct cache manipulation during incremental loads
   const queryClient = useQueryClient();
@@ -29,6 +27,7 @@ export default function TransactionList() {
   // Get transactions from cache early so useEffect can reference it
   const allTransactions = queryClient.getQueryData<Transaction[]>(nearKeys.recentTransactions()) || [];
   const transactions = allTransactions;
+
   const latestHeight = latestBlock?.header.height || 0;
   const isLoading = latestLoading && transactions.length === 0;
   const error = latestError;
@@ -85,76 +84,53 @@ export default function TransactionList() {
       )
     : allTransactions;
 
-  // Initial load - fetch last 20 blocks when latestBlock first becomes available
-  useEffect(() => {
-    if (!latestBlock || initialLoadDone) return;
-
-    const startHeight = Math.max(0, latestBlock.header.height - 19);
-    setLastProcessedHeight(latestBlock.header.height);
-    setInitialLoadDone(true);
-
-    // Initialize empty transactions in cache
-    const existingTransactions = queryClient.getQueryData<Transaction[]>(nearKeys.recentTransactions());
-    if (!existingTransactions) {
-      queryClient.setQueryData(nearKeys.recentTransactions(), []);
-    }
-
-    // Fetch and merge transactions from initial 20 blocks
-    fetchAndMergeTransactions(startHeight, latestBlock.header.height);
-  }, [latestBlock, initialLoadDone]);
-
-  // Incremental updates - fetch new blocks every time latestBlock height increases
-  useEffect(() => {
-    if (!latestBlock || !initialLoadDone || latestBlock.header.height <= lastProcessedHeight) {
-      return;
-    }
-
-    // Save scroll position before new data arrives
-    if (containerRef.current) {
-      setScrollTop(containerRef.current.scrollTop);
-    }
-
-    const startHeight = lastProcessedHeight + 1;
-    const endHeight = latestBlock.header.height;
-
-    fetchAndMergeTransactions(startHeight, endHeight);
-  }, [latestBlock?.header.height, initialLoadDone]);
-
-  // Restore scroll position after new data is rendered
-  useEffect(() => {
-    if (containerRef.current && scrollTop > 0) {
-      containerRef.current.scrollTop = scrollTop;
-    }
-  }, [transactions]);
-
-  const handleScroll = () => {
-    if (containerRef.current) {
-      setScrollTop(containerRef.current.scrollTop);
-    }
-  };
-
   /**
    * Fetch transactions from a range of blocks and merge with cache
    * This implements the incremental loading pattern:
-   * - On initial load: fetch blocks [height-19 to height]
+   * - On initial load: fetch blocks [height-999 to height] (1000 blocks)
    * - On updates: fetch only [lastProcessedHeight+1 to newHeight]
    */
-  const fetchAndMergeTransactions = async (from: number, to: number) => {
+  const fetchAndMergeTransactions = useCallback(async (from: number, to: number) => {
     try {
-      const blockPromises: Promise<any>[] = [];
-
-      // Fetch blocks in reverse order (newest first)
-      for (let i = to; i >= from; i--) {
-        blockPromises.push(nearRpc.getBlock(i));
+      // Debug: Log which RPC URL is being used (only on first call)
+      const currentRpcUrl = nearRpc.getRpcUrl();
+      if (from === Math.max(0, (latestBlock?.header.height || 0) - 999)) {
+        console.log('[TransactionList] Using RPC URL:', currentRpcUrl);
       }
 
-      const newBlocks = await Promise.all(blockPromises);
-
-      // Extract transactions from all blocks
+      // Fetch blocks sequentially (similar to blocks page) to avoid overwhelming RPC
+      // Process each block immediately after fetching to reduce memory usage
       const newTransactions: Transaction[] = [];
-      for (const block of newBlocks) {
-        const blockTransactions = await nearRpc.getTransactionsFromBlock(block);
-        newTransactions.push(...blockTransactions);
+      
+      // Fetch blocks sequentially to avoid overwhelming RPC server
+      const CONCURRENT_LIMIT = 1; // Process only 1 block at a time
+      for (let i = to; i >= from; i -= CONCURRENT_LIMIT) {
+        const batchStart = Math.max(i - CONCURRENT_LIMIT + 1, from);
+        const batchEnd = i;
+        
+        // Fetch small batch of blocks concurrently
+        const blockPromises: Promise<any>[] = [];
+        for (let j = batchEnd; j >= batchStart; j--) {
+          blockPromises.push(nearRpc.getBlock(j));
+        }
+        
+        const batchBlocks = await Promise.all(blockPromises);
+        
+        // Extract transactions from each block in the batch
+        for (const block of batchBlocks) {
+          const blockTransactions = await nearRpc.getTransactionsFromBlock(block);
+          newTransactions.push(...blockTransactions);
+        }
+        
+        // Longer delay between batches to be very gentle on the RPC server
+        if (batchStart > from) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      // Only log when transactions are found (reduce verbosity)
+      if (newTransactions.length > 0) {
+        console.log(`[TransactionList] Found ${newTransactions.length} transactions in blocks ${from}-${to}`);
       }
 
       // Sort by block height (newest first)
@@ -172,16 +148,104 @@ export default function TransactionList() {
         // Deduplicate by transaction hash
         const unique = Array.from(new Map(combined.map((tx) => [tx.hash, tx])).values());
 
-        // Keep most recent 200 transactions to prevent memory bloat
-        return unique.slice(0, 200);
+        // Keep most recent 2000 transactions to prevent memory bloat (increased from 200 for 1000 blocks)
+        const finalTransactions = unique.slice(0, 2000);
+        if (unique.length > 2000) {
+          console.debug(`[TransactionList] Cache limit: ${unique.length} → 2000 transactions`);
+        }
+        
+        return finalTransactions;
       });
 
       setLastProcessedHeight(to);
     } catch (err) {
-      console.error(`Failed to fetch transactions from blocks ${from}-${to}:`, err);
+      // Log errors more concisely - just the message, not full stack trace
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[TransactionList] Failed blocks ${from}-${to}: ${errorMsg}`);
       // Don't throw - let the UI continue working with cached data
     }
-  };
+  }, [latestBlock, queryClient]);
+
+  /**
+   * Fetch transactions from a range of blocks in batches (for large ranges)
+   * Useful for initial load of 1000 blocks to avoid overwhelming the RPC
+   */
+  const fetchAndMergeTransactionsBatched = useCallback(async (from: number, to: number, batchSize: number = 5) => {
+    const totalBlocks = to - from + 1;
+    const totalBatches = Math.ceil(totalBlocks / batchSize);
+    console.log(`[TransactionList] Loading ${totalBlocks} blocks in ${totalBatches} batches...`);
+    
+    // Track errors for summary
+    const errorCounts = new Map<string, number>();
+    let successCount = 0;
+    
+    for (let batchStart = from; batchStart <= to; batchStart += batchSize) {
+      const batchEnd = Math.min(batchStart + batchSize - 1, to);
+      const batchNumber = Math.floor((batchStart - from) / batchSize) + 1;
+      
+      // Only log progress every 5 batches to reduce noise
+      if (batchNumber % 5 === 0 || batchNumber === totalBatches) {
+        console.log(`[TransactionList] Progress: ${batchNumber}/${totalBatches} batches`);
+      }
+      
+      try {
+        await fetchAndMergeTransactions(batchStart, batchEnd);
+        successCount++;
+        
+        // Longer delay between batches to avoid overwhelming RPC server
+        if (batchEnd < to) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (err) {
+        // Aggregate errors by message
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        errorCounts.set(errorMsg, (errorCounts.get(errorMsg) || 0) + 1);
+        // Continue with next batch even if this one fails
+      }
+    }
+    
+    // Log summary of errors instead of individual errors
+    if (errorCounts.size > 0) {
+      console.error(`[TransactionList] Batch summary: ${successCount} succeeded, ${totalBatches - successCount} failed`);
+      errorCounts.forEach((count, errorMsg) => {
+        console.error(`[TransactionList]   - ${count}x: ${errorMsg}`);
+      });
+    } else {
+      console.log(`[TransactionList] Completed loading all batches (${successCount}/${totalBatches} succeeded)`);
+    }
+  }, [fetchAndMergeTransactions]);
+
+  // Initial load - fetch last 1000 blocks when latestBlock first becomes available
+  useEffect(() => {
+         if (!latestBlock || initialLoadDone) return;
+
+           // Check the most recent blocks first (last 10 blocks)
+           const startHeight = Math.max(0, latestBlock.header.height - 9);
+    setLastProcessedHeight(latestBlock.header.height);
+    setInitialLoadDone(true);
+
+    // Initialize empty transactions in cache
+    const existingTransactions = queryClient.getQueryData<Transaction[]>(nearKeys.recentTransactions());
+    if (!existingTransactions) {
+      queryClient.setQueryData(nearKeys.recentTransactions(), []);
+    }
+
+           // Fetch and merge transactions from initial 50 blocks (batched to avoid overwhelming RPC)
+           console.log(`[TransactionList] Initial load: Fetching ${latestBlock.header.height - startHeight + 1} blocks (${startHeight} to ${latestBlock.header.height})`);
+           fetchAndMergeTransactionsBatched(startHeight, latestBlock.header.height, 2); // Use very small batches of 2 blocks
+  }, [latestBlock, initialLoadDone, fetchAndMergeTransactionsBatched, queryClient]);
+
+  // Incremental updates - fetch new blocks every time latestBlock height increases
+  useEffect(() => {
+    if (!latestBlock || !initialLoadDone || latestBlock.header.height <= lastProcessedHeight) {
+      return;
+    }
+
+    const startHeight = lastProcessedHeight + 1;
+    const endHeight = latestBlock.header.height;
+
+    fetchAndMergeTransactions(startHeight, endHeight);
+  }, [latestBlock?.header.height, initialLoadDone, lastProcessedHeight, fetchAndMergeTransactions]);
 
   if (isLoading) {
     return (
@@ -237,11 +301,7 @@ export default function TransactionList() {
             )}
           </div>
 
-          <div
-            ref={containerRef}
-            onScroll={handleScroll}
-            className="space-y-3 max-h-[calc(100vh-300px)] overflow-y-auto"
-          >
+          <div className="space-y-3">
             {filteredTransactions.length === 0 ? (
               <Card className="p-8 text-center border-border bg-card">
                 <div className="text-muted-foreground">

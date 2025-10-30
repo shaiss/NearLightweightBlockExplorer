@@ -25,7 +25,8 @@ const createChunkDetailsKey = (blockHeight: number) => [
 
 export default function BlockInspector({ block, onClose, onSelectTransaction }: BlockInspectorProps) {
   // Fetch transactions for this block from query cache
-  const { data: transactions = [], isLoading: txLoading } = useBlockTransactions(block?.header.height || 0);
+  const { data: transactionsData, isLoading: txLoading } = useBlockTransactions(block?.header.height || 0);
+  const transactions = Array.isArray(transactionsData) ? transactionsData : [];
 
   // Fetch chunk details
   const { data: chunkDetails = {}, isLoading: chunkLoading } = useQuery({

@@ -66,20 +66,20 @@ class RpcProxyClient {
     const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
     const proxyEndpoint = isDev ? '/rpc-proxy' : this.config.proxyUrl;
 
-    console.log(`[RPC Proxy] Sending request to ${proxyEndpoint} for target: ${targetUrl}`);
-
     try {
       const response = await fetch(proxyEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Target-URL': targetUrl,
         },
         body,
         signal,
       });
 
-      console.log(`[RPC Proxy] Response: ${response.status} ${response.statusText}`);
+      // Only log errors, not successful responses
+      if (!response.ok) {
+        console.error(`[RPC Proxy] Error: ${response.status} ${response.statusText} for ${targetUrl}`);
+      }
 
       return response;
     } catch (error) {
@@ -113,24 +113,17 @@ class RpcProxyClient {
    * Smart fetch: automatically choose proxy or direct based on URL and config
    */
   async smartFetch(url: string, body: string, signal?: AbortSignal): Promise<Response> {
-    console.log(`[RPC Proxy] smartFetch called for: ${url}`);
-    console.log(`[RPC Proxy] Proxy enabled: ${this.config.enabled}`);
-    console.log(`[RPC Proxy] Is local URL: ${this.isLocalUrl(url)}`);
-    
     // Always use direct fetch for localhost/local IPs
     if (this.isLocalUrl(url)) {
-      console.log(`[RPC Proxy] Using direct fetch for local URL`);
       return this.directFetch(url, body, signal);
     }
 
     // Use proxy if enabled for remote URLs
     if (this.config.enabled) {
-      console.log(`[RPC Proxy] Using proxy for remote URL`);
       return this.fetch(url, body, signal);
     }
 
     // Fall back to direct fetch
-    console.log(`[RPC Proxy] Proxy disabled, using direct fetch`);
     return this.directFetch(url, body, signal);
   }
 
@@ -164,11 +157,12 @@ export const rpcProxy = new RpcProxyClient();
 // This runs immediately when the module loads
 const enableProxy = () => {
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    console.log('[RPC Proxy] Auto-enabling proxy for localhost development');
-    console.log(`[RPC Proxy] Using proxy URL: ${PROXY_BASE_URL}`);
+    // Only log once on startup, not for every request
+    if (!(window as any).__rpcProxyEnabled) {
+      console.log('[RPC Proxy] Auto-enabled for localhost development');
+      (window as any).__rpcProxyEnabled = true;
+    }
     rpcProxy.configure({ enabled: true, proxyUrl: PROXY_BASE_URL });
-  } else {
-    console.warn('[RPC Proxy] Not on localhost, proxy disabled');
   }
 };
 

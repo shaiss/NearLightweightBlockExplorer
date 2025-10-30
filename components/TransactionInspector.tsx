@@ -1,6 +1,6 @@
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Transaction, nearRpc } from "@/lib/nearRpc";
+import { Transaction, nearRpc } from "@/lib/nearRpcFailover";
 
 interface TransactionInspectorProps {
   transaction: Transaction | null;

@@ -32,51 +32,69 @@ log_error() {
   echo -e "${RED}✗${NC}  $1"
 }
 
+# Function to check if port is in use
+is_port_in_use() {
+  local port=$1
+  # Use lsof on macOS, it's more reliable
+  lsof -ti:$port >/dev/null 2>&1
+}
+
 # Function to kill process on a specific port
 kill_port() {
   local port=$1
   log_info "Checking port $port..."
   
-  # Try using fuser (more reliable than lsof)
-  if command -v fuser &> /dev/null; then
-    if fuser -s $port/tcp 2>/dev/null; then
-      log_warning "Found process on port $port"
-      fuser -k $port/tcp 2>/dev/null || true
-      sleep 1
-      # Verify it's actually dead
-      if fuser -s $port/tcp 2>/dev/null; then
-        log_warning "Force killing process on port $port"
-        fuser -k -9 $port/tcp 2>/dev/null || true
-        sleep 1
-      fi
-    else
-      log_success "Port $port is free"
+  # Check if port is in use
+  if ! is_port_in_use $port; then
+    log_success "Port $port is free"
+    return 0
+  fi
+  
+  # Get ALL PIDs using this port (there can be multiple)
+  # Convert newlines to spaces for proper handling
+  local pids=$(lsof -ti:$port 2>/dev/null | tr '\n' ' ')
+  if [ -z "$pids" ]; then
+    log_success "Port $port is free"
+    return 0
+  fi
+  
+  # Trim trailing space
+  pids=$(echo $pids | xargs)
+  
+  log_warning "Found process(es) on port $port: $pids"
+  
+  # Try graceful shutdown first (SIGTERM) - kill all PIDs at once
+  kill -15 $pids 2>/dev/null || true
+  
+  # Wait for processes to terminate gracefully
+  local counter=0
+  while [ $counter -lt $KILL_TIMEOUT ]; do
+    if ! is_port_in_use $port; then
+      log_success "All processes terminated gracefully"
+      sleep 1  # Give OS time to release port
+      return 0
     fi
+    sleep 1
+    ((counter++))
+  done
+  
+  # Force kill any remaining processes (SIGKILL)
+  local remaining_pids=$(lsof -ti:$port 2>/dev/null | tr '\n' ' ' | xargs)
+  if [ -n "$remaining_pids" ]; then
+    log_warning "Force killing remaining process(es): $remaining_pids"
+    kill -9 $remaining_pids 2>/dev/null || true
+    sleep 2  # Give OS more time to release port after force kill
+  fi
+  
+  # Final verification
+  if is_port_in_use $port; then
+    local final_pids=$(lsof -ti:$port 2>/dev/null | tr '\n' ' ' | xargs)
+    log_error "Port $port is still in use by: $final_pids"
+    log_error "You may need to manually kill these processes"
+    return 1
   else
-    # Fallback to lsof if fuser not available (macOS)
-    local pid=$(lsof -ti:$port 2>/dev/null || echo "")
-    if [ -n "$pid" ]; then
-      log_warning "Found process $pid on port $port"
-      kill -15 $pid 2>/dev/null || true
-      
-      # Give it time to shut down gracefully
-      local counter=0
-      while [ $counter -lt $KILL_TIMEOUT ]; do
-        if ! kill -0 $pid 2>/dev/null; then
-          log_success "Process $pid terminated gracefully"
-          return 0
-        fi
-        sleep 1
-        ((counter++))
-      done
-      
-      # Force kill if still running
-      log_warning "Force killing process $pid"
-      kill -9 $pid 2>/dev/null || true
-      sleep 1
-    else
-      log_success "Port $port is free"
-    fi
+    log_success "Port $port is free"
+    return 0
   fi
 }
 
@@ -93,13 +111,23 @@ log_info "  Proxy port:     $PROXY_PORT"
 echo ""
 
 log_info "Cleaning up existing processes..."
-kill_port $FRONTEND_PORT
-kill_port $PROXY_PORT
+if ! kill_port $FRONTEND_PORT; then
+  log_error "Failed to free port $FRONTEND_PORT"
+  exit 1
+fi
+if ! kill_port $PROXY_PORT; then
+  log_error "Failed to free port $PROXY_PORT"
+  exit 1
+fi
 
 echo ""
 log_success "Cleanup complete!"
-echo ""
 
+# Give OS time to fully release ports
+log_info "Waiting for ports to be fully released..."
+sleep 2
+
+echo ""
 log_info "Starting development server..."
 echo ""
 

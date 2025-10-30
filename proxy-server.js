@@ -23,6 +23,9 @@ import { URL } from 'url';
 
 // Port precedence: env var > CLI arg > default
 const PORT = process.env.PROXY_PORT || process.argv[2] || 3001;
+
+// Target NEAR node (can be localnet, testnet, or mainnet)
+const NEAR_RPC_URL = process.env.NEAR_RPC_URL || 'http://54.90.246.254:3030';
 const TIMEOUT_MS = 30000; // 30 second timeout
 
 // CORS headers
@@ -60,28 +63,18 @@ function handleRequest(req, res) {
     return;
   }
 
-  // Get target URL from header
-  const targetUrl = req.headers['x-target-url'];
-  
-  if (!targetUrl) {
-    console.log(`   ❌ Missing X-Target-URL header`);
-    res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Missing X-Target-URL header' }));
-    return;
-  }
-  
+  // Use configured NEAR RPC URL (no need for X-Target-URL header)
+  const targetUrl = NEAR_RPC_URL;
   console.log(`   🎯 Target: ${targetUrl}`);
 
-  // Validate URL
+  // Parse the configured URL
   let url;
   try {
     url = new URL(targetUrl);
-    if (!url.protocol.startsWith('http')) {
-      throw new Error('Invalid protocol');
-    }
   } catch (error) {
-    res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid target URL' }));
+    console.log(`   ❌ Invalid NEAR_RPC_URL: ${targetUrl}`);
+    res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid NEAR_RPC_URL configuration' }));
     return;
   }
 
@@ -168,18 +161,30 @@ function handleRequest(req, res) {
 // Create server
 const server = http.createServer(handleRequest);
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\x1b[31m%s\x1b[0m`, `✗ Port ${PORT} is already in use`);
+    console.error('  Please ensure the port is free or set PROXY_PORT to a different port');
+    process.exit(1);
+  } else {
+    console.error('Server error:', err);
+    process.exit(1);
+  }
+});
+
 server.listen(PORT, () => {
   console.log('\x1b[36m%s\x1b[0m', '╔════════════════════════════════════════════╗');
-  console.log('\x1b[36m%s\x1b[0m', '║     NEAR RPC Proxy Server Running         ║');
+  console.log('\x1b[36m%s\x1b[0m', '║     NEAR RPC CORS Proxy Server            ║');
   console.log('\x1b[36m%s\x1b[0m', '╚════════════════════════════════════════════╝');
   console.log('');
   console.log('\x1b[32m%s\x1b[0m', `✓ Listening on: http://localhost:${PORT}`);
-  console.log('\x1b[33m%s\x1b[0m', '⚡ Ready to proxy RPC requests');
+  console.log('\x1b[33m%s\x1b[0m', `🎯 Proxying to: ${NEAR_RPC_URL}`);
+  console.log('\x1b[33m%s\x1b[0m', '⚡ Ready to handle CORS-enabled RPC requests');
   console.log('');
   console.log('Usage:');
   console.log('  POST http://localhost:' + PORT);
-  console.log('  Header: X-Target-URL: <rpc-endpoint>');
   console.log('  Body: JSON-RPC request');
+  console.log('  CORS headers automatically added');
   console.log('');
   console.log('Press Ctrl+C to stop');
   console.log('');
